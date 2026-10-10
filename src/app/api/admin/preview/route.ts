@@ -1,0 +1,6 @@
+import {NextResponse} from "next/server";
+import {createHash} from "node:crypto";
+import {requireAdmin} from "../_auth";
+import {parseFile} from "@/lib/importer";
+export const runtime="nodejs";
+export async function POST(request:Request){if(!await requireAdmin())return NextResponse.json({error:"Unauthorised."},{status:401});try{const form=await request.formData();const file=form.get("file");if(!(file instanceof File))return NextResponse.json({error:"Choose a CSV or Excel file."},{status:400});const maxMb=Number(process.env.MAX_UPLOAD_MB||10);if(file.size>maxMb*1024*1024)return NextResponse.json({error:`File exceeds the ${maxMb} MB limit.`},{status:413});const parsed=parseFile(Buffer.from(await file.arrayBuffer()),file.name);const maxRows=Number(process.env.MAX_IMPORT_ROWS||10000);if(!parsed.rows.length)return NextResponse.json({error:"The file contains no data rows."},{status:400});if(parsed.rows.length>maxRows)return NextResponse.json({error:`File exceeds the ${maxRows.toLocaleString()} row limit.`},{status:400});return NextResponse.json({filename:file.name,headers:parsed.headers,suggestions:parsed.suggestions,sample:parsed.rows.slice(0,5),rows:parsed.rows.length,hash:createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex")});}catch(e){return NextResponse.json({error:(e as Error).message||"Unable to parse file."},{status:400})}}

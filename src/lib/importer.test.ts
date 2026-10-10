@@ -1,0 +1,13 @@
+import {describe,it,expect} from "vitest";
+import * as XLSX from "xlsx";
+import {mapRows,parseFile} from "./importer";
+import {buildLeaderboard,normalizeInstituteName} from "./leaderboard";
+const csv='Organisation Name,Institute ID,Individuals,Teams,2026\nIIM Visakhapatnam,inst-1,12,4,"8 (3)"\nExample Engineering College,inst-2,5,2,"5 (2)"';
+describe("registration snapshot import",()=>{
+  it("parses CSV and suggests common header mappings",()=>{const parsed=parseFile(Buffer.from(csv),"export.csv");expect(parsed.rows).toHaveLength(2);expect(parsed.suggestions).toMatchObject({name:"Organisation Name",id:"Institute ID",individuals:"Individuals",teams:"Teams"})});
+  it("parses Excel exports",()=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([["Institute","Individuals"],["College A",7]]),"Sheet1");const buf=XLSX.write(wb,{type:"buffer",bookType:"xlsx"}) as Buffer;expect(parseFile(buf,"export.xlsx").rows[0]).toMatchObject({Institute:"College A",Individuals:"7"})});
+  it("uses authoritative totals and parses year values without double counting",()=>{const p=parseFile(Buffer.from(csv),"x.csv");const mapped=mapRows(p,{name:"Organisation Name",id:"Institute ID",individuals:"Individuals",teams:"Teams",years:["2026"]});expect(mapped[0]).toMatchObject({individuals:12,teams:4,years:{2026:{individuals:8,teams:3}}})});
+  it("rejects negative, malformed counts, missing names and duplicate IDs",()=>{const run=(source:string)=>{const p=parseFile(Buffer.from(source),"x.csv");return()=>mapRows(p,{name:"Institute",individuals:"Individuals",id:"ID"})};expect(run("Institute,Individuals,ID\nA,-1,1") ).toThrow();expect(run("Institute,Individuals,ID\nA,nope,1")).toThrow();expect(run("Institute,Individuals,ID\n,2,1")).toThrow();expect(run("Institute,Individuals,ID\nA,2,1\nB,3,1")).toThrow()});
+  it("rejects snapshots with no total mapping",()=>{const p=parseFile(Buffer.from("Institute,2026\nA,5"),"x.csv");expect(()=>mapRows(p,{name:"Institute"} as never)).toThrow()});
+});
+describe("leaderboard",()=>{it("normalizes names, ranks counts, breaks ties alphabetically and computes shares",()=>{expect(normalizeInstituteName("  A   College ")).toBe("A College");const rows=buildLeaderboard([{name:"Zenith",individuals:5,teams:null,external_id:null,years:{}},{name:"Alpha",individuals:5,teams:2,external_id:null,years:{}},{name:"Beta",individuals:10,teams:null,external_id:null,years:{}}]);expect(rows.map(r=>r.name)).toEqual(["Beta","Alpha","Zenith"]);expect(rows[1].rank).toBe(2);expect(rows[0].share).toBe(50)});it("keeps empty leaderboard empty",()=>expect(buildLeaderboard([])).toEqual([]))});
